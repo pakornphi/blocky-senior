@@ -1,0 +1,14 @@
+.App {
+  text-align: center;
+}
+
+.block {
+  width: 100px;
+  height: 100px;
+  background-color: lightblue;
+  margin: 10px auto;
+  line-height: 100px;
+  font-size: 18px;
+  color: white;
+  font-weight: bold;
+}
