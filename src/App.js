@@ -1,14 +1,13 @@
 import React, { useRef, useState } from "react";
 import { FiTrash2 } from "react-icons/fi";
-import { useNavigate } from "react-router-dom"; // Import useNavigate for navigation
-import "./App.css";
+import { useNavigate } from "react-router-dom"; 
 
 function App() {
   const [blocks, setBlocks] = useState([1, 2, 3]);
   const [selectedBlock, setSelectedBlock] = useState(null);
   const [block1Url, setBlock1Url] = useState("");
   const nodeRefs = useRef([]);
-  const navigate = useNavigate(); // Initialize useNavigate
+  const navigate = useNavigate(); 
 
   const handleBlockClick = (blockId) => {
     setSelectedBlock(blockId);
@@ -36,10 +35,9 @@ function App() {
       const result = await response.json();
       console.log("CSRF Test Results:", result.results);
 
-      // Store the CSRF result in localStorage to be accessed on Dashboard
+   
       localStorage.setItem("csrfResult", JSON.stringify(result.results));
 
-      // Redirect to Dashboard page
       navigate("/dashboard");
     } catch (error) {
       console.error('Error during CSRF test:', error);

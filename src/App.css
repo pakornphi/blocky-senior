@@ -5,19 +5,19 @@
 
 .content {
   display: flex;
-  justify-content: flex-start; /* ใช้ flex-start เพื่อให้คอลัมน์ชิดด้านซ้าย */
+  justify-content: flex-start; 
   margin-top: 20px;
 }
 
 .sidebar {
-  width: 300px; /* กำหนดความกว้างของ sidebar */
+  width: 300px; 
   padding: 10px;
   background-color: #f0f0f0;
   border-radius: 8px;
   box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
   transition: transform 0.3s ease;
-  overflow-y: auto; /* เพิ่มการเลื่อนในแนวตั้งหากเนื้อหามากเกิน */
-  height: 100vh; /* ให้สูงเต็มหน้าจอ */
+  overflow-y: auto; 
+  height: 100vh; 
 }
 
 .sidebar h3 {
@@ -53,27 +53,27 @@
 
 .result-columns {
   display: flex;
-  justify-content: flex-start; /* ชิดซ้าย */
-  width: calc(100% - 320px); /* ปรับให้เหลือพื้นที่ที่ sidebar กินไป */
-  margin-left: 20px; /* เว้นระยะจาก Sidebar */
+  justify-content: flex-start; 
+  width: calc(100% - 320px); 
+  margin-left: 20px; 
   
 }
 
 .result-column {
-  flex: 1; /* ให้ทุกคอลัมน์ขยายตัวเท่ากัน */
+  flex: 1; 
   padding: 15px;
   background-color: #fff;
   border-radius: 8px;
   box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
-  margin-right: 15px; /* ระยะห่างระหว่างคอลัมน์ */
-  height: 300px; /* กำหนดความสูงของคอลัมน์ */
-  overflow-y: auto; /* เพิ่มการเลื่อนในแนวตั้งหากเนื้อหายาว */
+  margin-right: 15px; 
+  height: 300px; 
+  overflow-y: auto; 
   position: relative;
-  height: 100vh; /* ให้สูงเต็มหน้าจอ */
+  height: 100vh; 
 }
 
 .result-column:last-child {
-  margin-right: 0; /* ไม่มีช่องว่างระหว่างคอลัมน์สุดท้าย */
+  margin-right: 0; 
 }
 
 .result-column h2 {
@@ -81,7 +81,7 @@
   margin-bottom: 100px;
 }
 
-/* เส้นแบ่งระหว่างคอลัมน์ */
+
 .result-column::before {
   content: '';
   position: absolute;
@@ -130,5 +130,5 @@
 }
 
 body, .App, .sidebar, .result-column, h1, h2, h3, p, li {
-  color: black; /* กำหนดสีตัวหนังสือเป็นสีดำ */
+  color: black; 
 }
