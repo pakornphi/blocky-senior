@@ -1,13 +1,20 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';  // Import Router, Routes, and Route
 import './index.css';
 import App from './App';
+import Dashboard from './Dashboard';  // Import Dashboard component
 import reportWebVitals from './reportWebVitals';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-    <App />
+    <Router>  {/* Wrap the app with Router to enable routing */}
+      <Routes>  {/* Define the routes */}
+        <Route path="/" element={<App />} />  {/* Route for the main app */}
+        <Route path="/dashboard" element={<Dashboard />} />  {/* Route for the dashboard */}
+      </Routes>
+    </Router>
   </React.StrictMode>
 );
 
