@@ -2,6 +2,7 @@ import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from bs4 import BeautifulSoup
+from csrf import CSRFTester
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -14,9 +15,13 @@ def test_csrf():
     if not target_url:
         return jsonify({'error': 'URL is required'}), 400
 
-    # Perform CSRF testing logic (same as before)
-    # Example result:
-    return jsonify({'results': {'csrf_token_found': True}})
+    # Create an instance of CSRFTester with the target URL
+    tester = CSRFTester(target_url)
+
+    # Perform CSRF tests
+    test_results = tester.perform_test()
+
+    return jsonify({'results': test_results}), 200
 
 @app.route('/api/check-key', methods=['POST'])
 def check_key():
