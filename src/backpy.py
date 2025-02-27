@@ -1,11 +1,15 @@
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit  # Import SocketIO
 from bs4 import BeautifulSoup
 from csrf import CSRFTester
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
+# Initialize SocketIO
+socketio = SocketIO(app)
 
 @app.route('/api/test-csrf', methods=['POST'])
 def test_csrf():
@@ -47,6 +51,20 @@ def check_key():
     except Exception as e:
         return jsonify({'error': f'Error while fetching the page: {str(e)}'}), 500
 
+# WebSocket route to handle messages
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
+    emit('message', {'data': 'Connected to WebSocket server'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')
+
+@socketio.on('message')
+def handle_message(data):
+    print(f"Received message: {data['data']}")
+    emit('message', {'data': 'Message received!'})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    socketio.run(app, debug=True)
