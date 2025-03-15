@@ -3,7 +3,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit  # Import SocketIO
 from bs4 import BeautifulSoup
-from csrf import CSRFTester
+from csrf2 import CSRFTester
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
