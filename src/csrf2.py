@@ -1,275 +1,229 @@
 import requests
 from bs4 import BeautifulSoup
 import time
-import re
+import argparse
+import logging
+from urllib.parse import urljoin
+
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+
 
 class CSRFTester:
-    def __init__(self, base_url):
-        self.base_url = base_url
+    def __init__(
+        self,
+        base_url: str,
+        csrf_field: str = 'csrf_token',
+        form_selector: str = 'form',
+        endpoints: list[str] = None,
+        timeout: float = 5.0,
+        headers: dict = None,
+        max_retries: int = 2
+    ):
+        self.base_url = base_url.rstrip('/')
+        self.csrf_field = csrf_field
+        self.form_selector = form_selector
         self.session = requests.Session()
+        self.session.headers.update(headers or {})
+        self.timeout = timeout
+        self.endpoints = endpoints or ['/']
+        adapter = requests.adapters.HTTPAdapter(max_retries=max_retries)
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
 
-    def _get_form_data(self):
-        """Helper method to retrieve form and CSRF token data."""
-        response = self.session.get(self.base_url)
-        self._check_response(response)
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        form = soup.find('form')
-        if not form:
-            raise Exception("No form found on the page.")
-        
-        action = form.get('action', '')
+        # Auto-discover test methods
+        self.tests = {
+            name: getattr(self, name)
+            for name in dir(self)
+            if name.startswith('test_')
+        }
+
+    def _get(self, path: str):
+        url = urljoin(self.base_url, path)
+        resp = self.session.get(url, timeout=self.timeout)
+        resp.raise_for_status()
+        return resp
+
+    def _post(self, path: str, data: dict):
+        url = urljoin(self.base_url, path)
+        resp = self.session.post(url, data=data, timeout=self.timeout)
+        resp.raise_for_status()
+        return resp
+
+    def _find_forms(self, html: str):
+        soup = BeautifulSoup(html, 'html.parser')
+        return soup.select(self.form_selector)
+
+    def _extract_fields(self, form):
+        action = form.get('action', '/')
         method = form.get('method', 'post').lower()
-        inputs = form.find_all('input')
-        
-        form_data = {}
-        for input_tag in inputs:
-            name = input_tag.get('name')
-            if name:
-                form_data[name] = input_tag.get('value', '')
-        
-        return action, method, form_data
+        data = {inp['name']: inp.get('value', '') for inp in form.select('input[name]')}
+        return action, method, data
 
-    def _submit_form(self, action, method, form_data):#1
-        """Helper method to submit the form and check the response."""
-        if method == 'post':
-            response = self.session.post(self.base_url + action, data=form_data)
-        else:
-            response = self.session.get(self.base_url + action, params=form_data)
-        
-        self._check_response(response)
-        return response
+    def run_all(self):
+        results = {}
+        for name, fn in self.tests.items():
+            try:
+                vuln, info = fn()
+                results[name] = (vuln, info)
+            except Exception as e:
+                logging.error(f"{name} error: {e}")
+                results[name] = (None, None)
+        return results
 
-    def _check_response(self, response):
-        """Check the response status code."""
-        if response.status_code != 200:
-            raise Exception(f"Request failed with status code {response.status_code}")
+    #
+    # === TESTS BELOW ===
+    #
 
-    def _get_csrf_token(self):#2
-        """Helper method to extract the CSRF token from the form."""
-        response = self.session.get(self.base_url)
-        self._check_response(response)
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        csrf_token_input = soup.find('input', {'name': 'csrf_token'})
-        
-        if csrf_token_input:
-            return csrf_token_input.get('value', None)
-        else:
-            raise Exception("No CSRF token found in the form.")
+    def test_csrf_presence(self):
+        """Missing hidden field => vulnerability."""
+        for path in self.endpoints:
+            html = self._get(path).text
+            for form in self._find_forms(html):
+                _, _, data = self._extract_fields(form)
+                if self.csrf_field not in data:
+                    logging.warning(f"Form on {path} missing “{self.csrf_field}”")
+                    return True, path
+        return False, None
 
-    def check_csrf_token(self):#4
-        """Check if the CSRF token exists and is valid."""
-        try:
-            csrf_token = self._get_csrf_token()
-            print(f"CSRF token found: {csrf_token}")
-            return "pass", csrf_token
-        except Exception as e:
-            print(str(e))
-            return "fail", None
-
-    def check_csrf_reuse(self):#5
-        """Test if the CSRF token is reused across requests."""
-        status, csrf_token_before = self.check_csrf_token()
-        
-        if status == "fail":
-            return "fail", None
-        
-        action, method, form_data = self._get_form_data()
-        form_data.pop('csrf_token', None)  # Remove CSRF token for submission
-
-        self._submit_form(action, method, form_data)
-        status, csrf_token_after = self.check_csrf_token()
-
-        if csrf_token_before == csrf_token_after:
-            print("CSRF token is reused, indicating a potential vulnerability.")
-            return "fail", csrf_token_after
-        else:
-            print("CSRF token is dynamic, no issue detected.")
-            return "pass", csrf_token_after
-
-    def check_session_fixation(self):#6
-        """Test for session fixation vulnerability by testing session ID before and after form submission."""
-        original_session_id = self.session.cookies.get('PHPSESSID')
-        print(f"Original session ID: {original_session_id}")
-
-        attacker_session_id = 'attacker_session_id_12345'
-        self.session.cookies.set('PHPSESSID', attacker_session_id)
-        print(f"Attacker-controlled session ID set: {attacker_session_id}")
-
-        action, method, form_data = self._get_form_data()
-        self._submit_form(action, method, form_data)
-
-        new_session_id = self.session.cookies.get('PHPSESSID')
-        print(f"Session ID after form submission: {new_session_id}")
-
-        if new_session_id == original_session_id:
-            print("Session ID was not changed after form submission. Possible session fixation vulnerability detected.")
-            return "fail", new_session_id
-        elif new_session_id == attacker_session_id:
-            print("Attacker-controlled session ID was reused after form submission. Session fixation vulnerability confirmed.")
-            return "fail", new_session_id
-        else:
-            print("Session ID changed after form submission. No session fixation vulnerability detected.")
-            return "pass", new_session_id
-
-    def check_get_request_vulnerable_to_csrf(self):#7
-        """Check if any GET request is vulnerable to CSRF."""
-        response = self.session.get(self.base_url)
-        self._check_response(response)
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        forms = soup.find_all('form')
-        
-        vulnerable_forms = []
-        for form in forms:
-            method = form.get('method', 'post').lower()
-            action = form.get('action', '')
-            
-            if method == 'get' and ('delete' in action or 'update' in action or 'edit' in action):
-                print(f"Warning: GET request to {action} could be vulnerable to CSRF.")
-                vulnerable_forms.append(action)
-        
-        return "fail", vulnerable_forms if vulnerable_forms else "pass", []
-
-    def check_post_without_csrf(self):#8
-        """Check if any POST request is missing CSRF protection."""
-        response = self.session.get(self.base_url)
-        self._check_response(response)
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        forms = soup.find_all('form')
-        
-        vulnerable_forms = []
-        for form in forms:
-            method = form.get('method', 'post').lower()
-            action = form.get('action', '')
-            
-            if method == 'post' and not form.find('input', {'name': 'csrf_token'}):
-                print(f"Warning: POST form at {action} does not have CSRF token protection.")
-                vulnerable_forms.append(action)
-        
-        return "fail", vulnerable_forms if vulnerable_forms else "pass", []
-
-    def check_double_submit_cookies(self):#9
-        """Check if Double Submit Cookies protection is implemented."""
-        response = self.session.get(self.base_url)
-        self._check_response(response)
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        csrf_token_cookie = self.session.cookies.get('csrf_token')
-        
-        if not csrf_token_cookie:
-            print("No CSRF token found in cookies.")
-            return "fail", None
-        
-        print(f"CSRF token in cookies: {csrf_token_cookie}")
-        
-        forms = soup.find_all('form')
-        for form in forms:
-            method = form.get('method', 'post').lower()
-            action = form.get('action', '')
-            
-            if method == 'post':
-                csrf_token_input = form.find('input', {'name': 'csrf_token'})
-                if csrf_token_input:
-                    csrf_token_value = csrf_token_input.get('value', None)
-                    print(f"CSRF token in form: {csrf_token_value}")
-                    
-                    if csrf_token_value == csrf_token_cookie:
-                        print("Double Submit Cookies protection detected.")
-                        return "pass", csrf_token_value
-                    else:
-                        print("CSRF token mismatch between form and cookie.")
-                        return "fail", None
+    def test_csrf_reuse(self):
+        """Reuse same token twice => vulnerability."""
+        for path in self.endpoints:
+            html = self._get(path).text
+            for form in self._find_forms(html):
+                action, method, data = self._extract_fields(form)
+                token = data.get(self.csrf_field)
+                if not token:
+                    continue
+                # first submit
+                if method == 'post':
+                    self._post(action, data)
                 else:
-                    print(f"No CSRF token found in form with action: {action}")
-                    return "fail", None
-        
-        return "fail", None
+                    self._get(action, params=data)
+                # second submit
+                try:
+                    if method == 'post':
+                        self._post(action, data)
+                    else:
+                        self._get(action, params=data)
+                    logging.warning(f"Token reused on {action}")
+                    return True, token
+                except:
+                    pass
+        return False, None
 
-    def check_csrf_expiration(self):#10
-        """Test CSRF token expiration."""
-        action, method, form_data = self._get_form_data()
-        
-        csrf_token = form_data.get('csrf_token', None)
-        if not csrf_token:
-            print("No CSRF token found in the form.")
-            return "fail", None
-        
-        print(f"CSRF token found: {csrf_token}")
-        
-        print("Submitting form with valid CSRF token...")
-        self._submit_form(action, method, form_data)
-        
-        print("Waiting for CSRF token to expire...")
-        time.sleep(5)  # Simulating token expiration
-        
-        print("Submitting form again with the same CSRF token (expired)...")
-        form_data['csrf_token'] = csrf_token
-        
-        expired_submission = self._submit_form(action, method, form_data)
-        
-        if expired_submission == "fail":
-            print("CSRF token has expired. The server correctly rejected the request.")
-            return "pass", csrf_token
+    def test_token_format(self):
+        """Server must reject malformed tokens."""
+        for path in self.endpoints:
+            html = self._get(path).text
+            for form in self._find_forms(html):
+                action, method, data = self._extract_fields(form)
+                if self.csrf_field not in data:
+                    continue
+                data[self.csrf_field] = 'X' * len(data[self.csrf_field])
+                try:
+                    if method == 'post':
+                        self._post(action, data)
+                    else:
+                        self._get(action, params=data)
+                    logging.warning(f"Bad token accepted on {action}")
+                    return True, data[self.csrf_field]
+                except:
+                    pass
+        return False, None
+
+    def test_dynamic_token(self):
+        """Token must change on each GET."""
+        for path in self.endpoints:
+            html1 = self._get(path).text
+            forms1 = self._find_forms(html1)
+            time.sleep(1)
+            html2 = self._get(path).text
+            forms2 = self._find_forms(html2)
+            for f1, f2 in zip(forms1, forms2):
+                _, _, d1 = self._extract_fields(f1)
+                _, _, d2 = self._extract_fields(f2)
+                if d1.get(self.csrf_field) == d2.get(self.csrf_field):
+                    logging.warning(f"Static token on {path}")
+                    return True, d1.get(self.csrf_field)
+        return False, None
+
+    def test_double_submit_cookie(self):
+        """Double-submit cookie missing => vulnerability."""
+        resp = self._get('/')
+        cookie_val = self.session.cookies.get(self.csrf_field)
+        if not cookie_val:
+            logging.warning("No CSRF cookie set")
+            return True, None
+        html = resp.text
+        for form in self._find_forms(html):
+            _, _, data = self._extract_fields(form)
+            if data.get(self.csrf_field) == cookie_val:
+                return False, cookie_val
+        logging.warning("Cookie / form mismatch")
+        return True, None
+
+    def test_expiration(self, wait: int = 5):
+        """Reusing token after wait => vulnerability."""
+        html = self._get('/').text
+        action, method, data = self._extract_fields(self._find_forms(html)[0])
+        token = data.get(self.csrf_field)
+        if method == 'post':
+            self._post(action, data)
         else:
-            print("CSRF token did not expire as expected.")
-            return "fail", csrf_token
-
-    def is_token_format_valid(self, token):#11
-        """Check if the CSRF token format is valid."""
-        pattern = r'^[a-zA-Z0-9]{32}$'
-        return bool(re.match(pattern, token))
-
-    def check_incorrect_csrf_format(self):#11
-        """Test if CSRF token format is correct."""
-        action, method, form_data = self._get_form_data()
-        
-        csrf_token = form_data.get('csrf_token', None)
-        if not csrf_token:
-            print("No CSRF token found in the form.")
-            return "fail", None
-        
-        print(f"CSRF token found: {csrf_token}")
-        
-        if not self.is_token_format_valid(csrf_token):
-            print("CSRF token format is invalid.")
-            form_data['csrf_token'] = "invalid_format_token"
-            submission_result = self._submit_form(action, method, form_data)
-            
-            if submission_result == "fail":
-                print("The server correctly rejected the request with an invalid CSRF token format.")
-                return "pass", csrf_token
+            self._get(action, params=data)
+        time.sleep(wait)
+        try:
+            if method == 'post':
+                self._post(action, data)
             else:
-                print("The server did not reject the invalid CSRF token format as expected.")
-                return "fail", csrf_token
-        else:
-            print("CSRF token format is valid.")
-            return "pass", csrf_token
+                self._get(action, params=data)
+            logging.warning("Expired token accepted")
+            return True, token
+        except:
+            return False, token
 
-    def check_dynamic_csrf(self):#12
-        """Test dynamic CSRF token generation."""
-        action, method, form_data = self._get_form_data()
-        
-        csrf_token_before = form_data.get('csrf_token', None)
-        if not csrf_token_before:
-            print("No CSRF token found in the form.")
-            return "fail", None
-        
-        print(f"Original CSRF token: {csrf_token_before}")
-        
-        print("Submitting form with the current CSRF token...")
-        self._submit_form(action, method, form_data)
-        
-        action, method, form_data_after = self._get_form_data()
-        csrf_token_after = form_data_after.get('csrf_token', None)
-        
-        print(f"CSRF token after form submission: {csrf_token_after}")
-        
-        if csrf_token_before != csrf_token_after:
-            print("CSRF token has changed, indicating dynamic token generation.")
-            return "pass", csrf_token_after
-        else:
-            print("CSRF token did not change, indicating static token.")
-            return "fail", csrf_token_before
+    def test_session_fixation(self):
+        """Session must rotate on login; treat 404/405 as protected."""
+        orig = self.session.cookies.get('session')
+        self.session.cookies.set('session', 'attacker_value')
+
+        login_path = '/login'
+        login_url = urljoin(self.base_url, login_path)
+
+        try:
+            resp = self.session.get(login_url, timeout=self.timeout)
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            if e.response.status_code in (404, 405):
+                return False, (orig, None)
+            raise
+
+        new = self.session.cookies.get('session')
+        if new in (orig, 'attacker_value'):
+            logging.warning("Session fixation possible")
+            return True, (orig, new)
+        return False, (orig, new)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('base_url', help='e.g. https://example.com')
+    parser.add_argument('--csrf-field', default='csrf_token')
+    parser.add_argument('--form-selector', default='form')
+    parser.add_argument('--endpoints', nargs='*', default=['/'])
+    args = parser.parse_args()
+
+    tester = CSRFTester(
+        base_url=args.base_url,
+        csrf_field=args.csrf_field,
+        form_selector=args.form_selector,
+        endpoints=args.endpoints
+    )
+
+    results = tester.run_all()
+    for name, (vuln, info) in results.items():
+        # vuln=True → vulnerability detected; False → protected; None → test error
+        line = f"{name:25s} → vulnerability:{vuln}"
+        if info is not None:
+            line += f"  info={info}"
+        print(line)
